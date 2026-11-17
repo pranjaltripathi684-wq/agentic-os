@@ -1,0 +1,86 @@
+# Agentic OS policy: decides what happens to every tool call.
+#
+#   allow = run without asking    ask = show you first    deny = block
+#
+# Checked in this order; the first match decides:
+#   1. deny rules: shell deny_patterns, sensitive paths, denied domains
+#   2. per-tool rules (tools:)
+#   3. network: allowed domains run without asking; unlisted ones follow `unlisted`
+#   4. shell: simple read-only commands in auto_allow run without asking
+#   5. risk_defaults
+# Anything that matches nothing is DENIED.
+#
+# To customise: run `agentos policy edit` (copies this file to ~/.agentos/policy.yaml) and edit the copy.
+# Check a decision without running anything:
+#   agentos policy check run_shell '{"command": "ls -la"}'
+
+version: 1
+
+risk_defaults:
+  read: allow       # look inside the workspace
+  write: ask        # change files in the workspace
+  network: ask      # fetch web pages
+  exec: ask         # run commands in the sandbox, call MCP servers
+
+tools:
+  system_info: allow
+  recall: allow     # search memory
+  remember: ask     # save to memory
+  "mcp_*": ask
+
+paths:
+  # Glob patterns, matched against the path inside the workspace.
+  # Applies to every tool argument named "path" and to words in shell commands.
+  deny:
+    - "**/.ssh/**"
+    - "**/.gnupg/**"
+    - "**/*.pem"
+    - "**/*.key"
+    - "**/.env"
+    - "**/.env.*"
+    - "**/id_rsa*"
+    - "**/id_ed25519*"
+    - "**/.git-credentials"
+    - "**/.netrc"
+
+network:
+  allow_domains:
+    - example.com
+    - "*.wikipedia.org"
+    - docs.python.org
+    - pypi.org
+    - github.com
+    - raw.githubusercontent.com
+  deny_domains:     # common places to dump stolen data
+    - "*.ngrok.io"
+    - "*.ngrok-free.app"
+    - pastebin.com
+    - transfer.sh
+    - webhook.site
+    - "*.requestbin.net"
+    - "*.burpcollaborator.net"
+    - "*.interact.sh"
+  unlisted: ask     # ask or deny
+
+shell:
+  deny_patterns:    # regular expressions (case-insensitive)
+    - '\brm\s+(-\S+\s+)*(/|/\*|~/?\*?|\$HOME/?\*?)(\s|;|&|\||$)'
+    - '\bmkfs(\.\w+)?\b'
+    - '\bdd\b.*\bof=/dev/'
+    - '>\s*/dev/(sd[a-z]|nvme\d|hd[a-z])'
+    - ':\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:'
+    - '\bchmod\s+(-\S+\s+)*[0-7]{3,4}\s+/(\s|$)'
+    - '\b(shutdown|reboot|poweroff|halt)\b'
+    - '\b(curl|wget)\b[^|]*\|\s*(sudo\s+)?(ba|z|da)?sh\b'
+    - 'base64\s+(-d|--decode).*\|\s*(ba|z|da)?sh\b'
+    - '\b(nc|ncat|netcat|socat)\b'
+  # Commands made only of these programs (joined by |, ;, && or ||, with no
+  # output redirection or $(...)) run without asking. They still run in the sandbox.
+  auto_allow: [ls, cat, head, tail, wc, grep, find, du, df, echo, pwd, sort, uniq, date, stat,
+               file, tree, jq, diff, basename, dirname, realpath, whoami, id, uname, cut, tr, nl]
+
+taint:
+  # Once the agent has read untrusted content (files, web pages, command output,
+  # MCP results), calls with these risks ALWAYS ask, even if a rule above says allow.
+  # This is the main defence against prompt injection.
+  escalate: [write, network, exec]

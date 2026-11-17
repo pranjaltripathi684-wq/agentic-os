@@ -1,0 +1,27 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Install bubblewrap (sandbox tests skip if the runner blocks user namespaces)
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+      - name: Install Agentic OS
+        run: pip install -e ".[all]"
+      - name: Lint
+        run: ruff check .
+      - name: Tests
+        run: pytest -q
+      - name: Red-team regression run
+        run: |
+          agentos redteam --levels baseline,full --humans careless,absent --out /tmp/redteam
+          cat /tmp/redteam/redteam-report.md >> "$GITHUB_STEP_SUMMARY"

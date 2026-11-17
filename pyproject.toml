@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentic-os"
+version = "1.0.0"
+description = "A personal, secure-by-design AI agent for Linux: local LLM, sandboxed tools, policy engine, tamper-evident audit log."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Pranjal Tripathi" }]
+keywords = ["ai-agent", "llm", "security", "sandbox", "prompt-injection", "ollama", "mcp"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX :: Linux",
+    "Topic :: Security",
+    "Environment :: Console",
+]
+dependencies = [
+    "ollama>=0.5",
+    "rich>=13",
+    "pyyaml>=6",
+    "mcp>=1.10",
+]
+
+[project.optional-dependencies]
+crypto = ["cryptography>=42"]                       # signed audit checkpoints
+tui = ["textual>=0.80"]                             # agentos tui
+web = ["fastapi>=0.110", "uvicorn>=0.29"]           # agentos dashboard
+voice = ["faster-whisper>=1.0", "sounddevice>=0.4", "numpy"]
+dev = ["pytest>=8", "ruff>=0.5", "httpx"]
+all = ["agentic-os[crypto,tui,web,dev]"]
+
+[project.scripts]
+agentos = "agentos.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["agentos*"]
+
+[tool.setuptools.package-data]
+agentos = ["policies/*.yaml", "redteam/*.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-p no:cacheprovider"
+
+[tool.ruff]
+line-length = 130
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B"]
+ignore = ["B008"]
+
+[tool.ruff.lint.per-file-ignores]
+"agentos/interfaces/web.py" = ["E501"]     # the embedded HTML page
+"agentos/security/guard.py" = ["E501"]     # long regular expressions read better on one line

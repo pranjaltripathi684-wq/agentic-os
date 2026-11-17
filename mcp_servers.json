@@ -1,0 +1,10 @@
+{
+  "_readme": "MCP servers the agent may use. They run on your machine with your permissions (NOT in the sandbox), so enable only servers you trust. Every MCP tool call asks for approval.",
+  "servers": {
+    "demo": {
+      "enabled": false,
+      "command": "python3",
+      "args": ["demo/mcp_demo_server.py"]
+    }
+  }
+}
