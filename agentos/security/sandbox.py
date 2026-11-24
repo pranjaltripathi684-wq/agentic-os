@@ -253,7 +253,7 @@ class NoSandbox(Sandbox):
 
 
 # --------------------------------------------------------------------------- choosing one
-_cache = {}
+_cache: dict = {}
 
 
 def get_sandbox() -> Sandbox:
@@ -262,6 +262,7 @@ def get_sandbox() -> Sandbox:
     if key in _cache:
         return _cache[key]
     choice = config.SANDBOX
+    box: Sandbox
     if choice == "docker":
         if not DockerSandbox.available():
             raise SandboxError("Docker isn't running. Start Docker, or use AGENTOS_SANDBOX=bwrap.")

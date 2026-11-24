@@ -94,12 +94,12 @@ class AutoApprover:
 
 # ------------------------------------------------------------------ the gate
 class Gate:
-    def __init__(self, approver=None, policy: Policy = None, token=None, task_id="task"):
+    def __init__(self, approver=None, policy: Policy | None = None, token=None, task_id="task"):
         self.approver = approver or ConsoleApprover()
         self.policy = policy or Policy.load()
         self.token = token or scope.issue(task_id, scope.parse_risks(config.DEFAULT_SCOPE))
-        self.grants = set()               # tools allowed "for this task"
-        self.recent = deque()             # timestamps of executed calls
+        self.grants: set[str] = set()     # tools allowed "for this task"
+        self.recent: deque[float] = deque()   # timestamps of executed calls
         self.planned_tools = None         # set by plan-first mode
 
     def check(self, tool, args: dict, tainted: bool = False) -> Decision:

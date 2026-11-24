@@ -2,10 +2,14 @@ name: CI
 
 on: [push, pull_request]
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         python: ["3.10", "3.12"]
     steps:
@@ -19,9 +23,32 @@ jobs:
         run: pip install -e ".[all]"
       - name: Lint
         run: ruff check .
+      - name: Type check
+        run: mypy agentos
       - name: Tests
         run: pytest -q
       - name: Red-team regression run
         run: |
           agentos redteam --levels baseline,full --humans careless,absent --out /tmp/redteam
           cat /tmp/redteam/redteam-report.md >> "$GITHUB_STEP_SUMMARY"
+
+  package:
+    # Builds the wheel and installs it in a clean environment, the way `pipx install` would.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        run: pip install build && python -m build
+      - name: Install the wheel in a clean venv and smoke-test it
+        run: |
+          python -m venv /tmp/clean
+          /tmp/clean/bin/pip install dist/*.whl
+          cd /tmp
+          /tmp/clean/bin/agentos --version
+          /tmp/clean/bin/agentos tools
+          /tmp/clean/bin/agentos policy check run_shell '{"command": "cat .env"}' | grep DENY
+          /tmp/clean/bin/agentos redteam --levels full --humans absent --only RT01,RT04
+          test -f ~/.agentos/reports/redteam-report.md

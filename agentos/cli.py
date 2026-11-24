@@ -11,6 +11,9 @@ The `agentos` command.
     agentos memory list|add|search|forget      agentos history
     agentos schedule add|list|remove           agentos daemon
     agentos mcp list|pin                 agentos tools        agentos selftest
+    agentos model list|use|pull|bench|tune   choose the model, check and tune it for your GPU
+    agentos config show|set|unset        saved settings (~/.agentos/settings.json)
+    agentos eval                         test the real model on your machine and record the results
     agentos redteam                      attack yourself and write docs/redteam-report.md
 
 `python main.py "goal"` still works and means `agentos run "goal"`.
@@ -344,6 +347,171 @@ def cmd_mcp(args):
         console.print(f"[yellow]warning:[/yellow] {esc(w)}")
 
 
+def cmd_model(args):
+    from .core import models
+    from .core.llm import LLMError, same_model
+    action = args.action or "list"
+    try:
+        if action == "list":
+            installed = models.list_installed()
+            gpu = models.nvidia_gpu()
+            table = Table(title=f"Models in Ollama (current: {config.MODEL})")
+            for col in ("", "model", "size", "tools", "thinking", "runs on"):
+                table.add_column(col)
+            for m in installed:
+                mark = "[green]*[/green]" if same_model(m.name, config.MODEL) else ""
+                yes_no = {True: "yes", False: "[red]no[/red]", None: "?"}
+                table.add_row(mark, esc(m.name), f"{m.size_gb} GB", yes_no[m.tools],
+                              {True: "yes", False: "no", None: "?"}[m.thinking], models.where_it_runs(models.gpu_share(m.name)))
+            console.print(table if installed else "No models downloaded yet.")
+            console.print(f"[dim]GPU: {esc(gpu) if gpu else 'no NVIDIA GPU visible'}. 'runs on' is filled in for "
+                          "models that are loaded right now.[/dim]")
+            missing = [r for r in models.RECOMMENDED if not any(same_model(m.name, r[0]) for m in installed)]
+            if missing:
+                console.print("\n[bold]Recommended, not downloaded:[/bold]")
+                for name, size, why in missing:
+                    console.print(f"  {name:<32} {size:>7}  {why}")
+                console.print("[dim]Switch with: agentos model use <name>   (downloads it if needed)[/dim]")
+        elif action == "pull":
+            _pull_with_progress(args.name)
+        elif action == "use":
+            name = args.name
+            if not any(same_model(m, name) for m in [i.name for i in models.list_installed()]):
+                if not args.yes and console.input(f"'{esc(name)}' isn't downloaded. Download it now? \\[y/N] "
+                                                  ).strip().lower() not in ("y", "yes"):
+                    console.print("Nothing changed.")
+                    return
+                _pull_with_progress(name)
+            tools, thinking = models.capabilities(name)
+            if tools is False and not args.force:
+                console.print(f"[bold red]{esc(name)} can't call tools[/bold red], so it can't drive the agent. "
+                              "Pick a model with the 'tools' tag (or add --force).")
+                sys.exit(1)
+            config.save_setting("model", name)
+            console.print(f"Agentic OS now uses [bold]{esc(name)}[/bold] (saved in {config.SETTINGS_FILE}).")
+            _env_note("model")
+            if thinking:
+                console.print("[dim]This is a thinking model; Agentic OS switches thinking off for speed.[/dim]")
+            console.print("[dim]Check it: agentos model bench[/dim]")
+        elif action == "tune":
+            _tune(args.name or config.MODEL, args.yes)
+        elif action == "bench":
+            names = args.names or [config.MODEL]
+            table = Table(title="Model benchmark: one tool-call round trip on this machine")
+            for col in ("model", "load", "runs on", "picked tool", "answer ok", "s/step", "tokens/s", "verdict"):
+                table.add_column(col, overflow="fold")
+            notes = []
+            for name in names:
+                console.print(f"[dim]benchmarking {esc(name)}...[/dim]")
+                r = models.bench(name)
+                notes += r.notes
+                if r.error:
+                    table.add_row(esc(name), "", "", "", "", "", "", f"[red]{esc(r.error)}[/red]")
+                    continue
+                colour = "green" if r.verdict == "good" else "yellow" if r.tool_ok else "red"
+                tool_colour = "green" if r.tool_ok else "red"
+                table.add_row(esc(name), f"{r.load_s}s", models.where_it_runs(r.gpu),
+                              f"[{tool_colour}]{esc(r.tool_called)}[/{tool_colour}]",
+                              "yes" if r.answer_ok else "no", str(r.step_s), str(r.tokens_per_s),
+                              f"[{colour}]{r.verdict}[/{colour}]")
+            console.print(table)
+            for n in dict.fromkeys(notes):
+                console.print(f"[yellow]note:[/yellow] {n}")
+    except LLMError as e:
+        console.print(f"[bold red]{esc(str(e))}[/bold red]")
+        sys.exit(1)
+
+
+def _tune(name, yes=False):
+    from .core import models
+    console.print(f"Tuning [bold]{esc(name)}[/bold] for this GPU: up to {len(models.TUNE_CANDIDATES)} benchmarks, "
+                  "best settings first. Takes a few minutes.")
+
+    def show(t):
+        where = models.where_it_runs(t.gpu)
+        result = f"[red]{esc(t.error)}[/red]" if t.error else f"{where}, {t.step_s} s/step" + (
+            "" if t.tool_ok else ", [red]wrong tool[/red]")
+        console.print(f"  num_ctx {t.num_ctx:<5} num_batch {t.num_batch:<4} -> {result}")
+    baseline, trials, best = models.tune(name, on_trial=show)
+    if baseline:
+        used, total = baseline
+        console.print(f"[dim]With the model unloaded, other programs were using {used} of {total} MiB of VRAM.[/dim]")
+    if best is None:
+        console.print("[red]No setting worked; check `agentos model bench` for the error.[/red]")
+        return
+    fits = best.gpu is not None and best.gpu >= 0.99
+    console.print(("[green]Fits fully on the GPU[/green]" if fits else "[yellow]Nothing fits fully on the GPU[/yellow]")
+                  + f" with num_ctx {best.num_ctx}, num_batch {best.num_batch}: {best.step_s} s per step.")
+    if not fits:
+        console.print("[dim]Closing apps that use the GPU (browser video, games) frees VRAM; a smaller model "
+                      "(agentos model use qwen3:1.7b) fits easily but is less reliable.[/dim]")
+    if (best.num_ctx, best.num_batch) == (config.NUM_CTX, config.NUM_BATCH):
+        console.print("These are already your settings.")
+        return
+    if yes or console.input("Save these settings? \\[y/N] ").strip().lower() in ("y", "yes"):
+        config.save_setting("num_ctx", best.num_ctx)
+        config.save_setting("num_batch", best.num_batch)
+        console.print(f"Saved: num_ctx = {best.num_ctx}, num_batch = {best.num_batch}")
+
+
+def _pull_with_progress(name):
+    from rich.progress import BarColumn, DownloadColumn, Progress, TextColumn
+
+    from .core import models
+    with Progress(TextColumn("{task.description}"), BarColumn(), DownloadColumn(), console=console) as bar:
+        task = bar.add_task(f"pulling {name}", total=None)
+
+        def show(status, done, total):
+            if total:
+                bar.update(task, description=f"{name}: {status[:40]}", completed=done, total=total)
+            else:
+                bar.update(task, description=f"{name}: {status[:40]}")
+        models.pull(name, on_progress=show)
+    console.print(f"[green]Downloaded {esc(name)}.[/green]")
+
+
+def cmd_config(args):
+    if args.action == "show":
+        saved = config.saved_settings()
+        table = Table(title=f"Settings ({config.SETTINGS_FILE})")
+        for col in ("setting", "value", "from", "what it does"):
+            table.add_column(col, overflow="fold")
+        for key, (attr, _kind, what) in config.SAVEABLE.items():
+            env = config.ENV_VARS[key]
+            source = f"env {env}" if os.getenv(env) is not None else "saved" if key in saved else "default"
+            table.add_row(key, esc(str(getattr(config, attr))), source, what)
+        console.print(table)
+        return
+    if args.key not in config.SAVEABLE:
+        console.print(f"[red]Unknown setting '{esc(str(args.key))}'.[/red] Settings: {', '.join(config.SAVEABLE)}")
+        sys.exit(1)
+    if args.action == "unset":
+        config.save_setting(args.key, None)
+        console.print(f"{args.key} is back to its default ({esc(str(config.DEFAULTS[config.SAVEABLE[args.key][0]]))}).")
+        _env_note(args.key)
+        return
+    if args.value is None:
+        console.print("usage: agentos config set <setting> <value>")
+        sys.exit(1)
+    try:
+        value = config.parse_setting(args.key, args.value)
+    except ValueError as e:
+        console.print(f"[red]{esc(str(e))}[/red]")
+        sys.exit(1)
+    if args.key == "sandbox" and value == "none":
+        console.print("[bold red]Warning:[/bold red] with sandbox 'none', shell commands run as you, with full access.")
+    config.save_setting(args.key, value)
+    console.print(f"Saved: {args.key} = {esc(str(value))}")
+    _env_note(args.key)
+
+
+def _env_note(key):
+    env = config.ENV_VARS[key]
+    if os.getenv(env) is not None:
+        console.print(f"[yellow]Note:[/yellow] {env} is set in this terminal and overrides the saved value "
+                      f"(unset {env} to use it).")
+
+
 def cmd_redteam(args):
     from .redteam.harness import LEVELS, run_all, save_results
     from .redteam.report import rates, write_report
@@ -358,12 +526,50 @@ def cmd_redteam(args):
         mark = "[bold red]THROUGH[/bold red]" if o.success else "[green]blocked[/green]"
         console.print(f"  {o.id} {o.level:<9} {o.human:<8} {mark} {', '.join(o.blocked_by)}")
     meta, outcomes = run_all(levels, humans, only, args.model, progress=progress)
-    out = Path(args.out)
+    out = Path(args.out) if args.out else config.output_dir()
     save_results(meta, outcomes, out / "redteam-results.json")
     path = write_report(meta, outcomes, out)
     for (level, human), (s, n) in sorted(rates(outcomes).items()):
         console.print(f"{level:<10} {human:<9} {s}/{n} attacks got through")
     console.print(f"Report: [bold]{path}[/bold]")
+
+
+def cmd_eval(args):
+    from .evaluation import previous_redteam, run_eval, summary_counts, update_timeline, write_report
+    from .security import killswitch
+    apply_options(args)
+    if args.max_steps:
+        config.MAX_STEPS = args.max_steps
+    box = require_sandbox()
+    require_model()
+    only = {x.strip().upper() for x in args.only.split(",")} if args.only else None
+    console.print(f"Evaluating [bold]{esc(config.MODEL)}[/bold] with the {box.name} sandbox. Everything runs in a "
+                  "throwaway workspace; your files, memory and audit log aren't touched. `agentos stop` ends it.")
+    config.STOP_FILE.unlink(missing_ok=True)
+    killswitch.register()
+    try:
+        results = run_eval(only=only, redteam=args.redteam, verbose=args.verbose, progress=lambda t: console.print(esc(t)))
+    finally:
+        killswitch.unregister()
+    out = Path(args.out) if args.out else config.output_dir()
+    if only and not args.out:
+        path = None                    # a partial run must not replace the full report
+    else:
+        if not results.get("redteam"):
+            results["redteam"] = previous_redteam(out / "model-eval.json", results["model"])
+        path = write_report(results, out)
+    tp, tn, sp, sn = summary_counts(results)
+    b = results["bench"]
+    lines = [f"Model {results['model']} on {results['runs_on']}: {b['step_s']} s per step",
+             f"Tasks done correctly: {tp}/{tn}      Safety checks held: {sp}/{sn}"]
+    if results.get("redteam"):
+        r = results["redteam"]["rates"]
+        c, a = r.get("full/careless", [0, 0]), r.get("full/absent", [0, 0])
+        lines.append(f"Real-model red team: careless {c[0]}/{c[1]} got through, unattended {a[0]}/{a[1]}")
+    lines.append(f"Report: {path}" if path else "Partial run (--only): the full report in docs/ was left as it is.")
+    console.print(Panel(esc("\n".join(lines)), title="agentos eval", border_style="green" if sp == sn else "red"))
+    if not only and not args.no_timeline and update_timeline(results, config.PROJECT_ROOT / "TIMELINE.md"):
+        console.print("[dim]Wrote the results into TIMELINE.md (Real-model results).[/dim]")
 
 
 def cmd_dashboard(args):
@@ -424,6 +630,7 @@ def cmd_init(args):
     try:
         check_ready()
         line(True, f"Ollama is running and has {config.MODEL}")
+        _gpu_line(line)
     except LLMError as e:
         line(False, "Ollama / model", str(e))
     try:
@@ -450,9 +657,32 @@ def cmd_init(args):
                           if ok else "[yellow]Fix the items above, then run `agentos init` again.[/yellow]"))
 
 
+def _gpu_line(line):
+    """Load the model once and report whether it landed on the GPU."""
+    from .core import models
+    gpu = models.nvidia_gpu()
+    console.print("[dim]       loading the model once to see where it runs...[/dim]")
+    try:
+        models.llm._chat_once(dict(model=config.MODEL, messages=[{"role": "user", "content": "hi"}],
+                                   options={**models.llm.model_options(), "num_predict": 1},
+                                   keep_alive=config.KEEP_ALIVE))
+    except Exception as e:                         # init reports problems; it never crashes
+        line(False, f"model failed to load: {type(e).__name__}", "try a smaller model: agentos model use qwen3:1.7b")
+        return
+    place = models.where_it_runs(models.gpu_share(config.MODEL))
+    if place == "100% GPU":
+        line(True, "model runs on the GPU" + (f" ({gpu})" if gpu else ""))
+    elif gpu:
+        line(False, f"GPU {gpu} is visible, but the model runs on: {place}",
+             "see README > Speed and the GPU (usually: update Ollama, or pick a smaller model)")
+    else:
+        console.print(f"[yellow]note[/yellow] no NVIDIA GPU visible, so the model runs on: {place}. "
+                      "That works, but each step takes longer.")
+
+
 # ------------------------------------------------------------------ parser
 COMMANDS = {"init", "run", "chat", "selftest", "tools", "stop", "audit", "policy", "memory", "history", "schedule",
-            "daemon", "mcp", "redteam", "dashboard", "tui", "voice"}
+            "daemon", "mcp", "model", "config", "eval", "redteam", "dashboard", "tui", "voice"}
 
 
 def build_parser():
@@ -516,13 +746,43 @@ def build_parser():
     sp = sub.add_parser("mcp", help="MCP servers and pinned tools")
     sp.add_argument("action", choices=["list", "pin"])
     sp.set_defaults(func=cmd_mcp)
+    sp = sub.add_parser("model", help="list, switch, download or benchmark models")
+    msub = sp.add_subparsers(dest="action")
+    msub.add_parser("list", help="downloaded models, where they run, recommendations")
+    mp = msub.add_parser("use", help="switch model (saved); downloads it if needed")
+    mp.add_argument("name")
+    mp.add_argument("-y", "--yes", action="store_true", help="download without asking")
+    mp.add_argument("--force", action="store_true", help="use it even if Ollama says it can't call tools")
+    msub.add_parser("pull", help="download a model").add_argument("name")
+    msub.add_parser("bench", help="time one tool-call round trip; check GPU use").add_argument("names", nargs="*")
+    mp = msub.add_parser("tune", help="find the context and batch size that fit your GPU, and save them")
+    mp.add_argument("name", nargs="?")
+    mp.add_argument("-y", "--yes", action="store_true", help="save without asking")
+    sp.set_defaults(func=cmd_model)
+    sp = sub.add_parser("config", help="saved settings")
+    sp.add_argument("action", choices=["show", "set", "unset"])
+    sp.add_argument("key", nargs="?")
+    sp.add_argument("value", nargs="?")
+    sp.set_defaults(func=cmd_config)
     sp = sub.add_parser("redteam", help="attack yourself and write a report")
     sp.add_argument("--model", default="obedient", choices=["obedient", "ollama"])
     sp.add_argument("--levels", help="comma list of baseline, full, full+plan")
     sp.add_argument("--humans", default="careless,absent")
     sp.add_argument("--only", help="comma list of attack IDs, e.g. RT01,RT04")
-    sp.add_argument("--out", default=str(config.PROJECT_ROOT / "docs"))
+    sp.add_argument("--out", help="folder for the report (default: the repo's docs/, or ~/.agentos/reports)")
     sp.set_defaults(func=cmd_redteam)
+    sp = sub.add_parser("eval", help="test the real model on this machine and record the results")
+    sp.add_argument("--redteam", action="store_true", help="also run the 34 attacks with the real model (slow)")
+    sp.add_argument("--only", help="comma list of check IDs, e.g. T2,S1")
+    sp.add_argument("--out", help="folder for model-eval.md (default: the repo's docs/, or ~/.agentos/reports)")
+    sp.add_argument("--no-timeline", action="store_true", help="don't write the results into TIMELINE.md")
+    sp.add_argument("--verbose", action="store_true", help="show every agent step")
+    sp.add_argument("--model", help=f"Ollama model (default {config.MODEL})")
+    sp.add_argument("--sandbox", choices=["auto", "docker", "bwrap", "none"])
+    sp.add_argument("--max-steps", type=int)
+    sp.add_argument("--plan-first", action="store_true", help="evaluate with plan-first mode on")
+    sp.add_argument("--quarantine", action="store_true", help="evaluate with the quarantine model on")
+    sp.set_defaults(func=cmd_eval)
     sp = sub.add_parser("dashboard", help="web dashboard on 127.0.0.1")
     sp.add_argument("--port", type=int, default=config.DASHBOARD_PORT)
     agent_opts(sp)
@@ -551,6 +811,9 @@ def main(argv=None):
             console.print("usage: agentos memory forget <id>")
             sys.exit(1)
         args.id = int(args.text[0])
+    if args.command == "config" and args.action != "show" and not args.key:
+        console.print("usage: agentos config set <setting> <value>  |  agentos config unset <setting>")
+        sys.exit(1)
     if args.command == "policy" and args.action == "check" and not args.tool:
         console.print("usage: agentos policy check <tool> '<json args>'")
         sys.exit(1)

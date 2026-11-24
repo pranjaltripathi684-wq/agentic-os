@@ -111,7 +111,7 @@ class Runner:
         return True
 
 
-def create_app(runner: Runner, token: str, port: int = None) -> FastAPI:
+def create_app(runner: Runner, token: str, port: int | None = None) -> FastAPI:
     app = FastAPI(title="Agentic OS", docs_url=None, redoc_url=None, openapi_url=None)
     port = port or config.DASHBOARD_PORT
     allowed_hosts = {f"127.0.0.1:{port}", f"localhost:{port}", "127.0.0.1", "localhost", "testserver"}

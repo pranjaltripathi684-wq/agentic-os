@@ -40,6 +40,7 @@ Method: STRIDE over the system's assets, entry points and trust boundaries. Resu
 | **T**ampering | Someone edits the audit log afterwards | Hash chain plus Ed25519-signed checkpoints (`security/audit.py`) | Someone with your account who also deletes the checkpoints |
 | **T**ampering | Memory poisoning ("always approve") | Memories saved after untrusted input are stored as untrusted and never auto-loaded (`memory/store.py`) | You could still approve a poisoned memory manually |
 | **T**ampering | MCP rug pull | SHA-256 pins of tool description and schema; changes are refused (`tools/mcp_client.py`) | The first load is trust-on-first-use |
+| **T**ampering | Settings changed to weaken the agent (`sandbox: none`) | `settings.json` lives in `~/.agentos` (mode 600), out of the agent's reach; `sandbox none` prints a red warning on every run | Someone with your account (out of scope) |
 | **R**epudiation | "The agent did that on its own" | Every decision is logged with tool, arguments, rule, reason, approver and taint state | None |
 | **I**nformation disclosure | Secrets reach the model or the log | Redaction of known formats, key=value secrets, URL credentials, env values (`security/redact.py`); protected paths in policy | Unusual secret formats can slip past redaction |
 | **I**nformation disclosure | Exfiltration via `http_get` | Network is out of the default scope; deny-listed paste/webhook domains; taint escalation; the sandbox has no network | An approved request to an unlisted domain (RT21, RT31) |
@@ -48,8 +49,11 @@ Method: STRIDE over the system's assets, entry points and trust boundaries. Resu
 | **D**enial of service | Fork bomb, endless loops, huge outputs | Sandbox process/memory/CPU limits, timeouts, step limit, rate limit, output truncation, context compaction | A slow laptop can still be kept busy for a while |
 | **E**levation of privilege | Commands escape to the host or gain root | Namespaces, no network, read-only root, `--cap-drop ALL`, `no-new-privileges`, non-root user, cleared environment | Kernel exploits (out of scope) |
 | **E**levation of privilege | A low-privilege agent role gains shell access | Role-filtered tools *and* role scopes; teammate output is untrusted | None known |
-| **E**levation of privilege | Agent widens its own scope | Scope tokens are HMAC-signed with an in-memory key and expire; widening needs you | None via the agent |
+| **E**levation of privilege | Agent widens its own scope | Scope tokens are HMAC-signed with an in-memory key and expire; widening needs you; in plan-first mode the scope is cut down to the plan before any untrusted input is read | None via the agent |
 
 ## The honest summary
+
+These numbers come from an "obedient" model that falls for every injection, the worst case. How often the model you actually run falls for them is measured separately by `agentos eval --redteam` ([docs/model-eval.md](model-eval.md)).
+
 
 The red team shows that with no human approving (scheduled jobs), **0 of 34 attacks get through**. With a human who approves everything, 11 of 34 get through with the default settings and 2 of 34 with plan-first mode. Every one of those needed a person to click *approve* on a request that was flagged in magenta as coming after untrusted input. The remaining weak point is the approval prompt, which is why it says so loudly.

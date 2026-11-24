@@ -95,3 +95,35 @@ def test_hostile_text_cannot_break_or_restyle_the_console(capsys, monkeypatch):
     run_cli("memory", "add", "[/weird] markup [bold]")
     run_cli("memory", "list")
     assert "[/weird] markup [bold]" in capsys.readouterr().out
+
+
+def test_voice_transcript_and_answer_are_shown_literally(capsys, monkeypatch):
+    agent = NS(run=lambda goal: NS(answer="[/] done [red]x[/red]"))
+    answers = iter(["", "y", "q"])
+    monkeypatch.setattr(voice, "speak", lambda text: True)
+    voice.voice_loop(lambda: agent, listen=lambda: "check [bold]disk[/", ask=lambda prompt: next(answers))
+    out = capsys.readouterr().out
+    assert "check [bold]disk[/" in out and "[/] done [red]x[/red]" in out
+
+
+@pytest.mark.parametrize("share, gpu, expect", [
+    (1.0, "RTX 3050", "ok   model runs on the GPU (RTX 3050)"),
+    (0.0, "RTX 3050", "FIX  GPU RTX 3050 is visible, but the model runs on: CPU only"),
+    (0.0, None, "no NVIDIA GPU visible, so the model runs on: CPU only"),
+    (1.0, None, "ok   model runs on the GPU"),
+])
+def test_init_reports_where_the_model_runs(monkeypatch, capsys, share, gpu, expect):
+    from rich.console import Console
+
+    from agentos.core import models
+    monkeypatch.setattr(cli, "console", Console(width=200))
+    monkeypatch.setattr(models, "nvidia_gpu", lambda: gpu)
+    monkeypatch.setattr(models, "gpu_share", lambda name: share)
+    monkeypatch.setattr(models.llm, "_chat_once", lambda kw: None)
+    results = []
+
+    def line(good, text, fix=""):
+        results.append(good)
+        cli.console.print(("ok   " if good else "FIX  ") + text)
+    cli._gpu_line(line)
+    assert expect in capsys.readouterr().out

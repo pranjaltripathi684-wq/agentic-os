@@ -20,6 +20,7 @@ import shutil
 import subprocess
 
 from rich.console import Console
+from rich.markup import escape
 
 console = Console()
 SAMPLE_RATE = 16000
@@ -93,10 +94,10 @@ def voice_loop(make_agent, seconds=6, listen=None, ask=None):
         if not text:
             console.print("[yellow]Didn't catch that.[/yellow]")
             continue
-        console.print(f"You said: [bold]{text}[/bold]")
+        console.print(f"You said: [bold]{escape(text)}[/bold]")     # a transcript is untrusted text
         if ask("Run this goal? \\[y/N] ").strip().lower() not in ("y", "yes"):
             console.print("[dim]Not run.[/dim]")
             continue
         result = make_agent().run(text)
-        console.print(f"[green]{result.answer}[/green]")
+        console.print(f"[green]{escape(result.answer)}[/green]")
         speak(result.answer)

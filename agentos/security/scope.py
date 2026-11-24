@@ -60,7 +60,7 @@ def parse_risks(text: str) -> frozenset:
     return risks
 
 
-def issue(task_id: str, risks, ttl_minutes: int = None) -> CapabilityToken:
+def issue(task_id: str, risks, ttl_minutes: int | None = None) -> CapabilityToken:
     risks = frozenset(risks) | {"read"}          # reading the workspace is always in scope
     issued = time.time()
     expires = issued + 60 * (ttl_minutes or config.SCOPE_TTL_MINUTES)

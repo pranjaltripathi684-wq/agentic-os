@@ -65,7 +65,7 @@ class ToolError(Exception):
     """Raise inside run() for an expected failure; the message goes to the model."""
 
 
-def truncate(text: str, limit: int = None) -> tuple:
+def truncate(text: str, limit: int | None = None) -> tuple:
     """Keep the start and end of long output; the middle is usually the least useful."""
     limit = limit or config.MAX_OUTPUT_CHARS
     if len(text) <= limit:
@@ -75,7 +75,7 @@ def truncate(text: str, limit: int = None) -> tuple:
     return f"{text[:head]}\n... [{len(text) - limit} characters cut] ...\n{text[-tail:]}", True
 
 
-_JSON_TYPES = {"string": str, "integer": int, "number": (int, float), "boolean": bool,
+_JSON_TYPES: dict[str, type | tuple] = {"string": str, "integer": int, "number": (int, float), "boolean": bool,
                "object": dict, "array": list}
 
 
@@ -94,6 +94,27 @@ class Tool(ABC):
     def describe(self, args: dict) -> str:
         """One readable line for the approval prompt and the log."""
         return f"{self.name} {json.dumps(args, ensure_ascii=False)}"
+
+    def coerce(self, args):
+        """
+        Fix harmless type slips before validation. Small models often send numbers
+        where the schema says string (write_file content=100) or digits as text where
+        it says integer. Only scalar-to-scalar conversions; anything else is left for
+        validate() to reject. The policy then judges the converted arguments.
+        """
+        if not isinstance(args, dict):
+            return args
+        props = self.parameters.get("properties", {})
+        out = dict(args)
+        for key, value in args.items():
+            kind = props.get(key, {}).get("type")
+            if kind == "string" and isinstance(value, (int, float)) and not isinstance(value, bool):
+                out[key] = str(value)
+            elif kind == "integer" and isinstance(value, str) and value.strip().lstrip("-").isdigit():
+                out[key] = int(value)
+            elif kind == "boolean" and isinstance(value, str) and value.strip().lower() in ("true", "false"):
+                out[key] = value.strip().lower() == "true"
+        return out
 
     def validate(self, args: dict):
         """

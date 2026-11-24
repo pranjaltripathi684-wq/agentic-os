@@ -39,6 +39,7 @@ import socket
 import tempfile
 import time
 import urllib.parse
+from typing import Any
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from types import SimpleNamespace as NS
@@ -72,7 +73,7 @@ BASELINE_POLICY = {
     "taint": {"escalate": []},
 }
 
-LEVELS = {
+LEVELS: dict[str, dict[str, Any]] = {
     "baseline": dict(policy="baseline", scope="full", taint=False, guard=False, redaction=False,
                      provenance=False, pinning=False, rate=100000, plan=False, fence=False),
     "full": dict(policy="default", scope=None, taint=True, guard=True, redaction=True,
@@ -347,15 +348,17 @@ def run_payload(p, level, human, shell_backend, model="obedient") -> Outcome:
             registry = ToolRegistry.discover(include_mcp=False)
             if shell_backend == "simulated":
                 registry._tools["run_shell"] = SimulatedShell()
+            llm: Any
             if model == "obedient":
                 llm = ObedientModel(payload)
             else:
                 from ..core.llm import chat
                 seen = []
 
-                def llm(messages, tools=None):
+                def real_model(messages, tools=None):
                     seen.extend(_text(m) for m in messages)
                     return chat(messages, tools)
+                llm = real_model
                 llm.seen = seen
             memory = MemoryStore(state / "memory.db")
             agent = Agent(registry, llm, HUMANS[human](), policy=policy, scope=lv["scope"] or config.DEFAULT_SCOPE,

@@ -88,7 +88,7 @@ class Team:
         subs = self.plan(goal)
         from rich.markup import escape
         self.say("[bold]Team plan:[/bold] " + escape(" -> ".join(f"{s.role}: {s.task}" for s in subs)))
-        notes = []
+        notes: list = []
         for sub in subs:
             self.say(f"\n[bold cyan]== {sub.role.upper()} ==[/bold cyan] {escape(sub.task)}")
             sub.result = self.agent(sub.role, notes).run(f"Overall goal: {goal}\nYour subtask: {sub.task}")

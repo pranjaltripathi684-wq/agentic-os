@@ -57,7 +57,7 @@ def chart_svg(meta, outcomes) -> str:
 def markdown(meta, outcomes, chart_name="redteam-chart.svg") -> str:
     r = rates(outcomes)
     levels, humans = meta["levels"], meta["humans"]
-    by_id = defaultdict(dict)
+    by_id: dict = defaultdict(dict)
     titles = {}
     for o in outcomes:
         by_id[o.id][(o.level, o.human)] = o
@@ -87,7 +87,9 @@ def markdown(meta, outcomes, chart_name="redteam-chart.svg") -> str:
               "- **Phase 2 baseline**: sandbox, risk-based approval, 8-pattern denylist.",
               "- **Full defences**: policy engine, task scope, taint escalation, redaction, injection heuristics, "
               "memory provenance, MCP pinning.",
-              "- **Full + plan-first**: the agent commits to its tools before reading untrusted content.", ""]
+              "- **Full + plan-first**: the agent commits to its tools before reading untrusted content, and the task "
+              "scope shrinks to what those tools need. Off-plan actions are stopped by that narrower scope "
+              "(\"task scope\") or by the plan check (\"plan-first\").", ""]
 
     cols = [(lv, hu) for hu in humans for lv in levels]
     lines += ["## Every attack", "",

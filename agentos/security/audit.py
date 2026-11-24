@@ -98,7 +98,7 @@ def read_entries(path=None, last=None):
 class VerifyResult:
     ok: bool
     entries: int
-    bad_seq: int = None
+    bad_seq: int | None = None
     reason: str = ""
     checkpoints: int = 0
 

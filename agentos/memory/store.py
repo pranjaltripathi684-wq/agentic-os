@@ -172,7 +172,7 @@ class MemoryStore:
         return [dict(r) for r in self.db.execute("SELECT * FROM steps WHERE task_id=? ORDER BY n", (task_id,))]
 
 
-_stores = {}
+_stores: dict = {}
 
 
 def get_store() -> MemoryStore:

@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,7 +8,8 @@ version = "1.0.0"
 description = "A personal, secure-by-design AI agent for Linux: local LLM, sandboxed tools, policy engine, tamper-evident audit log."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Pranjal Tripathi" }]
 keywords = ["ai-agent", "llm", "security", "sandbox", "prompt-injection", "ollama", "mcp"]
 classifiers = [
@@ -24,12 +25,17 @@ dependencies = [
     "mcp>=1.10",
 ]
 
+[project.urls]
+Homepage = "https://github.com/pranjaltripathi684-wq/agentic-os"
+Changelog = "https://github.com/pranjaltripathi684-wq/agentic-os/blob/main/CHANGELOG.md"
+Issues = "https://github.com/pranjaltripathi684-wq/agentic-os/issues"
+
 [project.optional-dependencies]
 crypto = ["cryptography>=42"]                       # signed audit checkpoints
 tui = ["textual>=0.80"]                             # agentos tui
 web = ["fastapi>=0.110", "uvicorn>=0.29"]           # agentos dashboard
 voice = ["faster-whisper>=1.0", "sounddevice>=0.4", "numpy"]
-dev = ["pytest>=8", "ruff>=0.5", "httpx"]
+dev = ["pytest>=8", "ruff>=0.5", "mypy>=1.10", "types-PyYAML", "httpx", "build"]
 all = ["agentic-os[crypto,tui,web,dev]"]
 
 [project.scripts]
@@ -56,3 +62,9 @@ ignore = ["B008"]
 [tool.ruff.lint.per-file-ignores]
 "agentos/interfaces/web.py" = ["E501"]     # the embedded HTML page
 "agentos/security/guard.py" = ["E501"]     # long regular expressions read better on one line
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true

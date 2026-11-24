@@ -44,7 +44,7 @@ def check_url(url: str) -> str:
     except socket.gaierror:
         raise ToolError(f"can't resolve host '{parts.hostname}'") from None
     for info in infos:
-        ip = ipaddress.ip_address(info[4][0].split("%")[0])
+        ip = ipaddress.ip_address(str(info[4][0]).split("%")[0])
         if not ip.is_global:
             raise ToolError(f"'{parts.hostname}' resolves to {ip}, a private/local address. Blocked.")
     return url

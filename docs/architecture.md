@@ -30,7 +30,8 @@ flowchart TD
    - **Kill switch:** has `agentos stop` been run?
    - **Rate limit:** more than 20 calls a minute?
    - **Task scope:** a signed, expiring capability token lists which risks (read, write, network, exec) this task may use (`security/scope.py`).
-   - **Plan-first** (optional): after untrusted input, only tools the agent committed to beforehand.
+   - **Plan-first** (optional): before reading anything, the agent lists the tools it will need. The task scope shrinks to
+     the risks those tools carry (anything extra is asked for once, up front), and after untrusted input only planned tools may run.
    - **Policy:** `allow`, `ask` or `deny` from YAML rules, each decision with a reason and the rule that made it (`security/policy.py`).
    - **Taint escalation:** once untrusted content has been read, risky calls always ask.
    - **The human**, when needed.
@@ -44,6 +45,7 @@ flowchart TD
 | --- | --- |
 | `core/agent.py` | The loop: memory context, plan-first, compaction, tool handling, event hooks for UIs |
 | `core/llm.py` | Ollama client; strips leaked reasoning; maps network errors to clear messages |
+| `core/models.py` | `agentos model`: installed models, capabilities, GPU share, download, benchmark |
 | `core/context.py` | Per-task context (task id, role, tainted) visible to tools |
 | `tools/` | Tool base class and auto-discovering registry; file, web, shell, system, memory and MCP tools |
 | `security/` | Gate and approvers, policy engine, scope tokens, sandbox, redaction, guard, audit log, kill switch |
@@ -51,6 +53,7 @@ flowchart TD
 | `agents/` | Multi-agent team (supervisor, researcher, operator, reviewer); scheduler |
 | `interfaces/` | Textual TUI, FastAPI dashboard, voice |
 | `redteam/` | Attack library, harness, report generator |
+| `evaluation.py` | `agentos eval`: the real model on everyday tasks and safety checks, in a throwaway workspace |
 | `cli.py` | The `agentos` command |
 
 ## Where state lives
@@ -65,11 +68,14 @@ Everything the agent must not be able to change lives in `~/.agentos/`. That fol
 | `~/.agentos/policy.yaml` | Your policy (optional; otherwise the packaged default) |
 | `~/.agentos/mcp_pins.json` | Approved MCP tool fingerprints |
 | `~/.agentos/schedule.json` | Scheduled jobs |
+| `~/.agentos/settings.json` | Saved settings: model, context size, sandbox, scope... (mode 600) |
+| `~/.agentos/reports/` | Reports when installed with pip/pipx (from a checkout they go to `docs/`) |
 | `~/agentos-workspace/` | The only folder the agent's tools can see (`/workspace` in the sandbox) |
 
 ## Design choices
 
-- **Dependency injection everywhere.** The agent receives its model, approver, policy and tools as arguments. That's why 190+ tests run in seconds without Ollama, and why the TUI, dashboard and red-team harness reuse the same loop.
+- **Dependency injection everywhere.** The agent receives its model, approver, policy and tools as arguments. That's why 210+ tests run in seconds without Ollama, and why the TUI, dashboard, red-team harness and `agentos eval` reuse the same loop.
 - **Defence in depth.** Every layer assumes the one before it failed. A Researcher agent has no `run_shell` tool *and* no `exec` scope. A shell command passes the policy *and* runs in the sandbox.
 - **Deny by default, explain everything.** An unmatched policy rule is a denial, and every decision in the audit log carries the rule that made it.
+- **Three kinds of testing.** Fake models make the tests deterministic; an always-fooled model gives the red team a worst case; `agentos eval` measures the real model, since that's what you actually run.
 - **One model, many roles.** The multi-agent team shares one loaded model with different system prompts, which keeps it inside 12 GB of RAM.

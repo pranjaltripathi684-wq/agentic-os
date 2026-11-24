@@ -11,3 +11,4 @@ logs/
 *.zip
 .state/
 .e2e/
+docs/demo.cast

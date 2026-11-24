@@ -22,9 +22,11 @@ def isolated(tmp_path, monkeypatch):
         "AUDIT_KEY": state / "keys" / "audit.pem", "STOP_FILE": state / "STOP", "PID_FILE": state / "agent.pid",
         "POLICY_FILE": state / "policy.yaml", "MEMORY_DB": state / "memory.db", "MCP_PINS": state / "pins.json",
         "SCHEDULE_FILE": state / "schedule.json", "MCP_CONFIG": tmp_path / "no-mcp.json",
-        "SANDBOX": "none", "INTERACTIVE": True, "MEMORY_EMBED_MODEL": "", "PLAN_FIRST": False,
-        "GUARD_QUARANTINE": False, "GUARD_HEURISTICS": True, "TAINT_ESCALATION": True, "REDACTION": True,
+        "INTERACTIVE": True, "GUARD_HEURISTICS": True, "TAINT_ESCALATION": True, "REDACTION": True,
         "MEMORY_PROVENANCE": True, "MCP_PINNING": True, "MCP_TRUST_ON_FIRST_USE": True, "RATE_LIMIT_PER_MIN": 20,
+        "SETTINGS_FILE": state / "settings.json",
+        **config.DEFAULTS,                       # your saved settings (agentos config set) never change test results
+        "SANDBOX": "none",
     }.items():
         monkeypatch.setattr(config, name, value)
     monkeypatch.setattr("agentos.notify.notify", lambda *a, **k: False)              # no desktop pop-ups from tests

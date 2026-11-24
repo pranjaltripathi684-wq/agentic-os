@@ -9,7 +9,7 @@ from agentos.core.agent import Agent
 from agentos.security import audit, killswitch
 from agentos.security.approval import AutoApprover
 from agentos.tools.base import Risk, Tool, ToolError, ToolResult
-from agentos.tools.files import ReadFile, WriteFile
+from agentos.tools.files import ListDir, ReadFile, WriteFile
 from agentos.tools.registry import ToolRegistry
 
 
@@ -173,11 +173,42 @@ def test_allow_for_this_task_is_remembered(ws):
 def test_plan_first_blocks_unplanned_tools_after_taint(ws):
     (ws / "n.txt").write_text("notes")
     script = [text_reply('["read_file"]'), tool_reply(call("read_file", path="n.txt")),
-              tool_reply(call("write_file", path="x", content="y")), text_reply("done")]
-    agent, _, _, _ = make(script, tools=[ReadFile(), WriteFile()], plan_first=True)
+              tool_reply(call("list_dir", path=".")), text_reply("done")]
+    agent, _, _, _ = make(script, tools=[ReadFile(), WriteFile(), ListDir()], plan_first=True)
     result = agent.run("summarise")
     assert result.steps[0].approved and not result.steps[1].approved
     assert "wasn't in the plan" in result.steps[1].reason
+
+
+def test_plan_shrinks_the_task_scope(ws):
+    """Least privilege: a read-only plan gives a read-only task, so a hijacked write hits the scope wall."""
+    (ws / "n.txt").write_text("notes")
+    script = [text_reply('["read_file"]'), tool_reply(call("write_file", path="x", content="y")), text_reply("done")]
+    agent, _, _, approver = make(script, tools=[ReadFile(), WriteFile()], plan_first=True)
+    result = agent.run("summarise n.txt")
+    assert agent.gate.token.risks == {"read"}
+    assert not result.steps[0].approved and "outside this task's scope" in result.steps[0].reason
+    assert not (ws / "x").exists()
+    entry = [e for e in events() if e["event"] == "scope_from_plan"][0]
+    assert entry["scope"] == ["read"] and entry["dropped"] == ["exec", "write"]
+
+
+def test_plan_asks_for_extra_risks_up_front():
+    class Fetch(Tool):
+        name, description, risk = "fetch", "fake web", Risk.NETWORK
+        parameters = {"type": "object", "properties": {}, "required": []}
+
+        def run(self):
+            return ToolResult(True, "page")
+    script = [text_reply('["fetch"]'), text_reply("done")]
+    agent, _, _, _ = make(script, tools=[Fetch()], plan_first=True)
+    agent.approver = AutoApprover("once", widen_scope=True)
+    agent.run("get the page")
+    assert agent.gate.token.risks == {"read", "network"}
+    agent2, _, _, _ = make([text_reply('["fetch"]'), text_reply("done")], tools=[Fetch()], plan_first=True)
+    agent2.approver = AutoApprover("once", widen_scope=False)
+    agent2.run("get the page")
+    assert agent2.gate.token.risks == {"read"}
 
 
 def test_stop_file_stops_the_agent():
@@ -205,3 +236,27 @@ def test_memory_context_and_history(isolated):
     system = llm.seen[0][0]["content"]
     assert "short answers" in system and "12 GB RAM" in system
     assert store.history()[0]["answer"] == "ok"
+
+
+def test_harmless_type_slips_are_fixed(ws):
+    """Small models send numbers where the schema says string (T5 in agentos eval)."""
+    agent, _, _, _ = make([tool_reply(call("write_file", path="total.txt", content=100)), text_reply("done")],
+                          tools=[WriteFile()])
+    result = agent.run("write the total")
+    assert result.steps[0].approved and (ws / "total.txt").read_text() == "100"
+
+
+def test_coercion_is_only_for_scalars():
+    w = WriteFile()
+    assert w.coerce({"path": "a", "content": 3.5}) == {"path": "a", "content": "3.5"}
+    assert w.coerce({"path": "a", "content": True})["content"] is True          # bools aren't turned into "True"
+    assert w.validate(w.coerce({"path": "a", "content": [1, 2]})) == "argument 'content' must be a string"
+
+    class T(Tool):
+        name, description = "t", "t"
+        parameters = {"type": "object", "properties": {"n": {"type": "integer"}, "b": {"type": "boolean"}}}
+
+        def run(self, n=0, b=False):
+            return ToolResult(True)
+    assert T().coerce({"n": "42", "b": "TRUE"}) == {"n": 42, "b": True}
+    assert T().coerce({"n": "4x"}) == {"n": "4x"} and T().validate({"n": "4x"}) == "argument 'n' must be a integer"

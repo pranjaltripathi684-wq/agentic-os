@@ -19,7 +19,7 @@ class TaskContext:
     tainted: bool = False
 
 
-current = ContextVar("agentos_task", default=None)
+current: ContextVar[TaskContext | None] = ContextVar("agentos_task", default=None)
 
 
 def get() -> TaskContext:
